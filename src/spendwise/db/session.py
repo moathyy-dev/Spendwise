@@ -21,7 +21,12 @@ def get_engine():
         # one thread); it is not a valid connection argument for other
         # backends such as Postgres, so it's only passed for sqlite:// URLs.
         connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
-        _engine = create_engine(url, connect_args=connect_args)
+        _engine = create_engine(
+            url,
+            connect_args=connect_args,
+            pool_pre_ping=True,
+            pool_recycle=300,
+        )
     return _engine
 
 
