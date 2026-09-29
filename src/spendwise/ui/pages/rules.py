@@ -3,6 +3,7 @@ from __future__ import annotations
 import streamlit as st
 from sqlalchemy import select
 
+from spendwise.categorize.rules_engine import normalize_merchant_for_matching
 from spendwise.db.models import Category, Rule, RuleType
 from spendwise.db.session import session_scope
 
@@ -57,7 +58,6 @@ def _render_rules(family_member_id):
                 select(Rule).where((Rule.family_member_id.is_(None)) | (Rule.family_member_id == family_member_id)).order_by(Rule.priority)
             ).scalars()
         )
-
         categories = list(session.execute(select(Category).where(Category.is_active.is_(True))).scalars())
         # Skip parent categories that have active subcategories — they're
         # grouping headers, not real assignable categories, and duplicate
@@ -101,12 +101,57 @@ def _render_rules(family_member_id):
         cat_id = st.selectbox("التصنيف", list(category_options.keys()), format_func=lambda cid: category_options[cid])
         priority = st.number_input("الأولوية (الأصغر = أولى)", value=300)
         if st.button("إضافة القاعدة", type="primary") and pattern.strip():
+            trimmed_pattern = pattern.strip()
+            normalized_new = normalize_merchant_for_matching(trimmed_pattern)
             with session_scope() as s2:
-                s2.add(
-                    Rule(
-                        rule_type=RuleType(rtype), pattern=pattern.strip(), category_id=cat_id,
-                        priority=priority, is_active=True, family_member_id=family_member_id,
-                    )
+                member_filter = (
+                    Rule.family_member_id.is_(None)
+                    if family_member_id is None
+                    else Rule.family_member_id == family_member_id
                 )
-            st.success("تمت إضافة القاعدة.")
-            st.rerun()
+                # Compare against every rule with the same type + scope,
+                # normalized the same way the matching engine does (case
+                # and diacritic-insensitive) — otherwise "Jahez" and "jahez"
+                # would look different here but match identically at
+                # classification time, letting true duplicates slip in.
+                same_scope_rules = list(
+                    s2.execute(
+                        select(Rule).where(Rule.rule_type == RuleType(rtype), member_filter)
+                    ).scalars()
+                )
+                exact_duplicate = next(
+                    (
+                        r for r in same_scope_rules
+                        if normalize_merchant_for_matching(r.pattern) == normalized_new
+                        and r.category_id == cat_id
+                    ),
+                    None,
+                )
+                conflicting = next(
+                    (
+                        r for r in same_scope_rules
+                        if normalize_merchant_for_matching(r.pattern) == normalized_new
+                        and r.category_id != cat_id
+                    ),
+                    None,
+                )
+                if exact_duplicate:
+                    st.warning(
+                        f"توجد قاعدة مطابقة بنفس الحقول مسبقًا (#{exact_duplicate.id}) — "
+                        f"نفس النص والنوع والتصنيف والنطاق. ما احتجنا نضيفها مرة ثانية."
+                    )
+                else:
+                    if conflicting:
+                        st.warning(
+                            f"تنبيه: يوجد قاعدة أخرى (#{conflicting.id}) بنفس النص «{trimmed_pattern}» "
+                            f"لكن بتصنيف مختلف ({category_options.get(conflicting.category_id, '—')}). "
+                            "الأولوية الأصغر بينهما هي اللي بتُطبّق فعليًا. سيتم إضافة القاعدة الجديدة رغم ذلك."
+                        )
+                    s2.add(
+                        Rule(
+                            rule_type=RuleType(rtype), pattern=trimmed_pattern, category_id=cat_id,
+                            priority=priority, is_active=True, family_member_id=family_member_id,
+                        )
+                    )
+                    st.success("تمت إضافة القاعدة.")
+                    st.rerun()
