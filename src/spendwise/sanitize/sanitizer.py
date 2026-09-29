@@ -42,7 +42,7 @@ def _strip_pii(text: str) -> str:
     return text
 
 
-def sanitize_merchant(raw_description: str, max_len: int = 60) -> str:
+def sanitize_merchant(raw_description: str, max_len: int = 160) -> str:
     """Produce a short, PII-free merchant label from a raw description."""
     if not raw_description:
         return "غير معروف"
