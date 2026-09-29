@@ -109,6 +109,9 @@ def _load_category_choices(session) -> list[dict]:
     from spendwise.db.models import Category
 
     rows = list(session.execute(select(Category).where(Category.is_active.is_(True))).scalars())
+    # Exclude parent categories that have subcategories — they're grouping
+    # headers, not real assignable categories, and just duplicate every
+    # child's label with the same prefix (also keeps the AI prompt smaller).
     parent_ids_with_children = {c.parent_id for c in rows if c.parent_id is not None}
     out = []
     for c in rows:
