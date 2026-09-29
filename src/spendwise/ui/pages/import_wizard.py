@@ -231,7 +231,7 @@ def _step_review(family_member_id: int):
     staged_rows = st.session_state.get("iw_staged_rows", [])
     default_currency = st.session_state["iw_default_currency"]
 
-        with session_scope() as session:
+    with session_scope() as session:
         categories = list(session.execute(select(Category).where(Category.is_active.is_(True))).scalars())
         # Parent categories that DO have active subcategories are pure grouping
         # headers, not something a transaction should ever be assigned to
