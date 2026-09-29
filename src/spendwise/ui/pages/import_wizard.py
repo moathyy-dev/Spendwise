@@ -231,10 +231,17 @@ def _step_review(family_member_id: int):
     staged_rows = st.session_state.get("iw_staged_rows", [])
     default_currency = st.session_state["iw_default_currency"]
 
-    with session_scope() as session:
+        with session_scope() as session:
         categories = list(session.execute(select(Category).where(Category.is_active.is_(True))).scalars())
+        parent_ids_with_children = {c.parent_id for c in categories if c.parent_id is not None}
         category_options = {None: "غير مصنّف"}
-        category_options.update({c.id: (c.name_ar if c.parent_id is None else f"{c.parent.name_ar} / {c.name_ar}") for c in categories})
+        category_options.update(
+            {
+                c.id: (c.name_ar if c.parent_id is None else f"{c.parent.name_ar} / {c.name_ar}")
+                for c in categories
+                if not (c.parent_id is None and c.id in parent_ids_with_children)
+            }
+        )
 
     currencies_used = sorted({r.currency.upper() for r in staged_rows if r.txn_date is not None})
     fx_rates = {}
