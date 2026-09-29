@@ -108,9 +108,12 @@ def _apply_ai_fallback(session, candidate_rows: list, results: dict, ai_provider
 def _load_category_choices(session) -> list[dict]:
     from spendwise.db.models import Category
 
-    rows = session.execute(select(Category).where(Category.is_active.is_(True))).scalars()
+    rows = list(session.execute(select(Category).where(Category.is_active.is_(True))).scalars())
+    parent_ids_with_children = {c.parent_id for c in rows if c.parent_id is not None}
     out = []
     for c in rows:
+        if c.parent_id is None and c.id in parent_ids_with_children:
+            continue
         label = c.name_ar if c.parent_id is None else f"{c.parent.name_ar} / {c.name_ar}"
         out.append({"id": c.id, "name": label})
     return out
