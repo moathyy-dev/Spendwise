@@ -57,8 +57,11 @@ def _render_rules(family_member_id):
                 select(Rule).where((Rule.family_member_id.is_(None)) | (Rule.family_member_id == family_member_id)).order_by(Rule.priority)
             ).scalars()
         )
-        
+
         categories = list(session.execute(select(Category).where(Category.is_active.is_(True))).scalars())
+        # Skip parent categories that have active subcategories — they're
+        # grouping headers, not real assignable categories, and duplicate
+        # every child's label with the same prefix.
         parent_ids_with_children = {c.parent_id for c in categories if c.parent_id is not None}
         category_options = {
             c.id: (c.name_ar if c.parent_id is None else f"{c.parent.name_ar} / {c.name_ar}")
