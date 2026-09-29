@@ -63,7 +63,13 @@ def sanitize_merchant(raw_description: str, max_len: int = 160) -> str:
         return "غير معروف"
 
     if len(text) > max_len:
-        text = text[:max_len].rstrip() + "…"
+        # Leave room for the appended ellipsis character itself — slicing to
+        # max_len and then adding "…" produces max_len + 1 characters, which
+        # overflowed the DB column (a real bug caught in production: Postgres
+        # rejected the insert with "value too long for type
+        # character varying(160)" once a description happened to sit right at
+        # the limit).
+        text = text[: max_len - 1].rstrip() + "…"
 
     return text
 
