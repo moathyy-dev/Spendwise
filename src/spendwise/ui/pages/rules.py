@@ -57,8 +57,14 @@ def _render_rules(family_member_id):
                 select(Rule).where((Rule.family_member_id.is_(None)) | (Rule.family_member_id == family_member_id)).order_by(Rule.priority)
             ).scalars()
         )
+        
         categories = list(session.execute(select(Category).where(Category.is_active.is_(True))).scalars())
-        category_options = {c.id: (c.name_ar if c.parent_id is None else f"{c.parent.name_ar} / {c.name_ar}") for c in categories}
+        parent_ids_with_children = {c.parent_id for c in categories if c.parent_id is not None}
+        category_options = {
+            c.id: (c.name_ar if c.parent_id is None else f"{c.parent.name_ar} / {c.name_ar}")
+            for c in categories
+            if not (c.parent_id is None and c.id in parent_ids_with_children)
+        }
 
         st.caption("القواعد ذات الأولوية (الرقم) الأصغر تُجرَّب أولًا. القواعد بدون عضو محدد تنطبق على جميع الأعضاء.")
 
