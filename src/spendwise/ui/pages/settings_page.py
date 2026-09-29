@@ -20,16 +20,15 @@ def render():
         "لن يتم إرسال اسمك، رقم حسابك، أو أي بيانات تعريفية شخصية أبدًا."
     )
 
-    consent_given = settings_store.get_flag("ai_consent_given", False)
-    current_enabled = settings.enable_online_ai
-
-    if not consent_given and not current_enabled:
-        agree = st.checkbox("أوافق على إرسال بيانات مُنقّاة (اسم تاجر + مبلغ فقط) إلى مزوّد الذكاء الاصطناعي عند الحاجة.")
-        enable_ai = st.checkbox("تفعيل التصنيف الذكي عبر الإنترنت", value=False, disabled=not agree)
-        if agree and enable_ai:
-            settings_store.set_flag("ai_consent_given", True)
-    else:
-        enable_ai = st.checkbox("تفعيل التصنيف الذكي عبر الإنترنت", value=current_enabled)
+    # A single checkbox bound directly to the saved setting. (Previously this
+    # gated a first-time "consent" checkbox behind a separate immediately-
+    # persisted flag, while the checkbox itself only took effect after the
+    # "حفظ الإعدادات" button below was clicked — those two different-timing
+    # persistence paths could disagree mid-interaction and made the consent
+    # block flash on/off. The consent notice is already shown as the caption
+    # above on every load, so a separate gating step added confusion without
+    # adding protection.)
+    enable_ai = st.checkbox("تفعيل التصنيف الذكي عبر الإنترنت", value=settings.enable_online_ai)
 
     st.divider()
     st.subheader("حدود الثقة في التصنيف")
