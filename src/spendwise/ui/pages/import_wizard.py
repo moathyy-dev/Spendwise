@@ -233,6 +233,11 @@ def _step_review(family_member_id: int):
 
         with session_scope() as session:
         categories = list(session.execute(select(Category).where(Category.is_active.is_(True))).scalars())
+        # Parent categories that DO have active subcategories are pure grouping
+        # headers, not something a transaction should ever be assigned to
+        # directly — showing them as a separate option just duplicates every
+        # child's label (e.g. "طعام وشراب" AND "طعام وشراب / مطاعم وكافيهات").
+        # Only a parent with no children (a flat category) stays selectable.
         parent_ids_with_children = {c.parent_id for c in categories if c.parent_id is not None}
         category_options = {None: "غير مصنّف"}
         category_options.update(
