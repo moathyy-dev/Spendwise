@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import streamlit as st
+from sqlalchemy import func, select
 
 from spendwise import settings_store
 from spendwise.config import get_settings
+from spendwise.db.models import Category
+from spendwise.db.session import session_scope
 
 
 def render():
@@ -51,6 +54,86 @@ def render():
         )
         st.success("تم حفظ الإعدادات بنجاح.")
         st.rerun()
+
+    st.divider()
+    st.subheader("📂 إدارة التصنيفات")
+    st.caption(
+        "عدّل أسماء التصنيفات الحالية، عطّل/فعّل تصنيفًا (تعطيل تصنيف لا يحذف أي معاملات مرتبطة به، "
+        "فقط يخفيه من قائمة الاختيار لاحقًا)، أو أضف تصنيفًا جديدًا — بدون الحاجة لتعديل الكود."
+    )
+
+    with session_scope() as session:
+        categories = list(
+            session.execute(select(Category).order_by(Category.sort_order, Category.id)).scalars()
+        )
+
+        if categories:
+            header_cols = st.columns([3, 1, 1])
+            header_cols[0].caption("الاسم")
+            header_cols[1].caption("الحالة")
+            header_cols[2].caption(" ")
+
+        for cat in categories:
+            cols = st.columns([3, 1, 1])
+            new_name = cols[0].text_input(
+                "الاسم", value=cat.name_ar, key=f"cat_name_{cat.id}", label_visibility="collapsed"
+            )
+            status_label = "نشط ✅" if cat.is_active else "معطّل ⛔"
+            cols[1].write(status_label)
+
+            name_changed = new_name.strip() and new_name.strip() != cat.name_ar
+            action_col = cols[2]
+            action_cols = action_col.columns(2)
+            if name_changed and action_cols[0].button("💾", key=f"cat_save_{cat.id}", help="حفظ الاسم الجديد"):
+                duplicate = session.execute(
+                    select(Category).where(Category.name_ar == new_name.strip(), Category.id != cat.id)
+                ).scalar_one_or_none()
+                if duplicate:
+                    st.warning(f"يوجد تصنيف آخر بنفس الاسم «{new_name.strip()}» مسبقًا.")
+                else:
+                    cat.name_ar = new_name.strip()
+                    session.commit()
+                    st.success("تم تحديث اسم التصنيف.")
+                    st.rerun()
+
+            toggle_icon = "⛔" if cat.is_active else "✅"
+            toggle_help = "تعطيل هذا التصنيف" if cat.is_active else "إعادة تفعيل هذا التصنيف"
+            if action_cols[1].button(toggle_icon, key=f"cat_toggle_{cat.id}", help=toggle_help):
+                cat.is_active = not cat.is_active
+                session.commit()
+                st.rerun()
+
+        st.markdown("**إضافة تصنيف جديد**")
+        add_cols = st.columns([3, 1])
+        new_cat_name = add_cols[0].text_input(
+            "اسم التصنيف الجديد", key="new_cat_name", label_visibility="collapsed", placeholder="مثال: هدايا"
+        )
+        if add_cols[1].button("➕ إضافة", type="primary"):
+            trimmed = new_cat_name.strip()
+            if not trimmed:
+                st.warning("اكتب اسم التصنيف أولًا.")
+            else:
+                exists = session.execute(
+                    select(Category).where(Category.name_ar == trimmed)
+                ).scalar_one_or_none()
+                if exists:
+                    st.warning("يوجد تصنيف بنفس الاسم مسبقًا.")
+                else:
+                    max_order = session.execute(
+                        select(func.max(Category.sort_order)).where(Category.parent_id.is_(None))
+                    ).scalar() or 0
+                    session.add(
+                        Category(
+                            name_ar=trimmed,
+                            parent_id=None,
+                            is_active=True,
+                            is_system=False,
+                            sort_order=max_order + 1,
+                        )
+                    )
+                    session.commit()
+                    st.success(f"تمت إضافة تصنيف «{trimmed}».")
+                    st.rerun()
 
     st.divider()
     st.caption("ملاحظة أمنية: مفاتيح الوصول (API Keys) تُقرأ فقط من ملف .env المحلي على جهازك، ولا يتم حفظها أو عرضها هنا أبدًا.")
