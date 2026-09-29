@@ -25,5 +25,18 @@ input, textarea { text-align: right; }
    correctly; the widget's own label above it is a separate element and stays
    right-aligned via the `label` rule above. */
 div[data-testid="stSlider"], div[data-testid="stSlider"] * { direction: ltr !important; }
+
+/* Same root cause as the slider fix above: the blanket `[class*="css"]`
+   rule also reaches Streamlit's own native top toolbar (the "Deploy" button
+   and the ⋮ menu, header[data-testid="stHeader"]), which is positioned
+   assuming an LTR page. Forcing rtl on it flips its internal layout math,
+   so it can render collapsed/overlapped by other top-of-page content
+   instead of staying pinned at the top-right corner. Reset it back to ltr
+   so it stays in its normal spot; this is purely Streamlit's own hosting
+   chrome, not something this app renders, so nothing else here is affected.
+   (Note: this toolbar fading in/out as your mouse moves away from the top
+   of the page is normal Streamlit behavior, not a bug — only the "hiding
+   behind other content" part was the actual issue.) */
+header[data-testid="stHeader"], header[data-testid="stHeader"] * { direction: ltr !important; }
 </style>
 """
