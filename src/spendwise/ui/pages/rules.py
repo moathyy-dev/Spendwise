@@ -107,77 +107,79 @@ def _render_rules(family_member_id):
 
         st.caption(
             "القواعد ذات الأولوية (الرقم) الأصغر تُجرَّب أولًا. القواعد بدون عضو محدد تنطبق على جميع الأعضاء. "
-            "عدّل أي حقل ثم اضغط «💾 حفظ» — ما تحتاج تحذف القاعدة وتضيفها من جديد."
+            "عدّل أي حقل ثم اضغط «💾» — ما تحتاج تحذف القاعدة وتضيفها من جديد. 🟢/🔴 يبيّن حالتها وتضغط عليه للتبديل."
         )
 
+        header_cols = st.columns([3, 2, 2, 1, 0.6, 0.6, 0.6])
+        for col, label in zip(header_cols, ["النص/الكلمة المفتاحية", "التصنيف", "النوع", "الأولوية", "الحالة", "", ""]):
+            col.caption(label)
+
         for rule in rules:
-            with st.container(border=True):
-                cols = st.columns([2, 2, 2, 1])
-                new_pattern = cols[0].text_input(
-                    "النص/الكلمة المفتاحية", value=rule.pattern, key=f"rule_pattern_{rule.id}", label_visibility="collapsed"
-                )
-                current_cat_index = category_ids.index(rule.category_id) if rule.category_id in category_ids else 0
-                new_cat_id = cols[1].selectbox(
-                    "التصنيف", category_ids, index=current_cat_index,
-                    format_func=lambda cid: category_options[cid], key=f"rule_cat_{rule.id}", label_visibility="collapsed",
-                )
-                current_rtype_value = rule.rule_type.value if hasattr(rule.rule_type, "value") else rule.rule_type
-                new_rtype = cols[2].selectbox(
-                    "النوع", rtype_values, index=rtype_values.index(current_rtype_value),
-                    format_func=lambda v: _RULE_TYPE_LABELS.get(v, v), key=f"rule_type_{rule.id}", label_visibility="collapsed",
-                )
-                new_priority = cols[3].number_input(
-                    "أولوية", value=rule.priority, key=f"rule_prio_{rule.id}", label_visibility="collapsed"
-                )
+            cols = st.columns([3, 2, 2, 1, 0.6, 0.6, 0.6])
+            new_pattern = cols[0].text_input(
+                "النص/الكلمة المفتاحية", value=rule.pattern, key=f"rule_pattern_{rule.id}", label_visibility="collapsed"
+            )
+            current_cat_index = category_ids.index(rule.category_id) if rule.category_id in category_ids else 0
+            new_cat_id = cols[1].selectbox(
+                "التصنيف", category_ids, index=current_cat_index,
+                format_func=lambda cid: category_options[cid], key=f"rule_cat_{rule.id}", label_visibility="collapsed",
+            )
+            current_rtype_value = rule.rule_type.value if hasattr(rule.rule_type, "value") else rule.rule_type
+            new_rtype = cols[2].selectbox(
+                "النوع", rtype_values, index=rtype_values.index(current_rtype_value),
+                format_func=lambda v: _RULE_TYPE_LABELS.get(v, v), key=f"rule_type_{rule.id}", label_visibility="collapsed",
+            )
+            new_priority = cols[3].number_input(
+                "أولوية", value=rule.priority, key=f"rule_prio_{rule.id}", label_visibility="collapsed"
+            )
 
+            # A single toggle button doubles as the status indicator: 🟢
+            # means active (click to disable), 🔴 means disabled (click to
+            # enable) — no separate status column needed, keeping the whole
+            # row on one line.
+            if cols[4].button(
+                "🟢" if rule.is_active else "🔴", key=f"rule_toggle_{rule.id}",
+                help="القاعدة نشطة — اضغط للتعطيل" if rule.is_active else "القاعدة معطّلة — اضغط للتفعيل",
+            ):
+                with session_scope() as s2:
+                    s2.get(Rule, rule.id).is_active = not rule.is_active
+                st.rerun()
+            if cols[5].button("🗑️", key=f"rule_delete_{rule.id}", help="حذف هذه القاعدة"):
+                with session_scope() as s2:
+                    s2.delete(s2.get(Rule, rule.id))
+                st.rerun()
+            # Always visible and always clickable — no "did anything change"
+            # detection to get wrong. Clicking it re-saves whatever is
+            # currently in the fields above, which is a harmless no-op if
+            # nothing was actually edited.
+            if cols[6].button("💾", key=f"rule_save_{rule.id}", help="حفظ التعديلات على هذه القاعدة", type="primary"):
                 trimmed_pattern = new_pattern.strip()
-                changed = (
-                    trimmed_pattern != rule.pattern
-                    or new_cat_id != rule.category_id
-                    or new_rtype != current_rtype_value
-                    or new_priority != rule.priority
-                )
-
-                status_cols = st.columns([2, 1, 1, 2])
-                status_cols[0].caption("نشطة ✅" if rule.is_active else "معطّلة ⛔")
-                if status_cols[1].button(
-                    "⛔" if rule.is_active else "✅", key=f"rule_toggle_{rule.id}",
-                    help="تعطيل هذه القاعدة" if rule.is_active else "تفعيل هذه القاعدة",
-                ):
+                if not trimmed_pattern:
+                    st.warning("النص/الكلمة المفتاحية لا يمكن أن تكون فارغة.")
+                else:
                     with session_scope() as s2:
-                        s2.get(Rule, rule.id).is_active = not rule.is_active
-                    st.rerun()
-                if status_cols[2].button("🗑️", key=f"rule_delete_{rule.id}", help="حذف هذه القاعدة"):
-                    with session_scope() as s2:
-                        s2.delete(s2.get(Rule, rule.id))
-                    st.rerun()
-                if changed and status_cols[3].button("💾 حفظ", key=f"rule_save_{rule.id}", type="primary"):
-                    if not trimmed_pattern:
-                        st.warning("النص/الكلمة المفتاحية لا يمكن أن تكون فارغة.")
-                    else:
-                        with session_scope() as s2:
-                            exact_duplicate, conflicting = _find_duplicate_and_conflict(
-                                s2, trimmed_pattern, new_rtype, family_member_id, new_cat_id, exclude_rule_id=rule.id
+                        exact_duplicate, conflicting = _find_duplicate_and_conflict(
+                            s2, trimmed_pattern, new_rtype, family_member_id, new_cat_id, exclude_rule_id=rule.id
+                        )
+                        if exact_duplicate:
+                            st.warning(
+                                f"توجد قاعدة أخرى مطابقة بنفس الحقول مسبقًا (#{exact_duplicate.id}) — "
+                                "التعديل غير مطلوب، هذي القاعدة مكررة."
                             )
-                            if exact_duplicate:
+                        else:
+                            if conflicting:
                                 st.warning(
-                                    f"توجد قاعدة أخرى مطابقة بنفس الحقول مسبقًا (#{exact_duplicate.id}) — "
-                                    "التعديل غير مطلوب، هذي القاعدة مكررة."
+                                    f"تنبيه: يوجد قاعدة أخرى (#{conflicting.id}) بنفس النص لكن بتصنيف مختلف "
+                                    f"({category_options.get(conflicting.category_id, '—')}). "
+                                    "الأولوية الأصغر بينهما هي اللي بتُطبّق فعليًا. سيتم حفظ التعديل رغم ذلك."
                                 )
-                            else:
-                                if conflicting:
-                                    st.warning(
-                                        f"تنبيه: يوجد قاعدة أخرى (#{conflicting.id}) بنفس النص لكن بتصنيف مختلف "
-                                        f"({category_options.get(conflicting.category_id, '—')}). "
-                                        "الأولوية الأصغر بينهما هي اللي بتُطبّق فعليًا. سيتم حفظ التعديل رغم ذلك."
-                                    )
-                                r = s2.get(Rule, rule.id)
-                                r.pattern = trimmed_pattern
-                                r.category_id = new_cat_id
-                                r.rule_type = RuleType(new_rtype)
-                                r.priority = new_priority
-                                st.success("تم حفظ التعديلات.")
-                                st.rerun()
+                            r = s2.get(Rule, rule.id)
+                            r.pattern = trimmed_pattern
+                            r.category_id = new_cat_id
+                            r.rule_type = RuleType(new_rtype)
+                            r.priority = new_priority
+                            st.success("تم حفظ التعديلات.")
+                            st.rerun()
 
         st.divider()
         st.subheader("إضافة قاعدة جديدة")
