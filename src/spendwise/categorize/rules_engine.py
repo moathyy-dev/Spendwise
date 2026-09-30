@@ -8,6 +8,7 @@ always see *why* a transaction was categorized a certain way.
 """
 from __future__ import annotations
 
+import re
 import unicodedata
 from dataclasses import dataclass
 
@@ -76,7 +77,13 @@ def classify_with_rules(merchant_sanitized: str, rules: list) -> ClassificationR
         if rtype == "exact":
             matched = target == pattern
         elif rtype in ("merchant_normalized", "learned", "keyword"):
-            matched = pattern in target
+            # Word-boundary match, not a raw substring check. A plain
+            # `pattern in target` let short keywords match as a fragment of
+            # an unrelated word — e.g. the default keyword "fee" (→
+            # "التزامات مالية") silently matched inside "coffee" (...co-FEE),
+            # misclassifying coffee-shop transactions. \b requires the
+            # pattern to sit at an actual word edge instead.
+            matched = re.search(r"\b" + re.escape(pattern) + r"\b", target) is not None
 
         if matched:
             confidence = _TYPE_BASE_CONFIDENCE.get(rtype, 70)
