@@ -314,13 +314,18 @@ def _step_review(family_member_id: int):
             else:
                 approved_count += 1
 
-    st.divider()
-    st.subheader("ملخص المطابقة")
-    net = sum((r.amount if r.direction == "credit" else -r.amount) for r in staged_rows if not r.excluded and r.txn_date is not None)
-    c1, c2, c3 = st.columns(3)
-    c1.metric("معتمدة", approved_count)
-    c2.metric("مستبعدة", excluded_count)
-    c3.metric("صافي الحركة (دائن - مدين)", f"{net:.2f}")
+        st.divider()
+        st.subheader("ملخص المطابقة")
+        kept_rows = [r for r in staged_rows if not r.excluded and r.txn_date is not None]
+        income_total = sum(r.amount for r in kept_rows if r.direction == "credit")
+        expense_total = sum(r.amount for r in kept_rows if r.direction == "debit")
+        net = income_total - expense_total
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("معتمدة", approved_count)
+        c2.metric("مستبعدة", excluded_count)
+        c3.metric("إجمالي الدخل (دائن)", f"{income_total:.2f}")
+        c4.metric("إجمالي المصروف (مدين)", f"{expense_total:.2f}")
+        c5.metric("الصافي", f"{net:.2f}")
 
     col_a, col_b = st.columns(2)
     if col_a.button("✅ تأكيد وحفظ", type="primary"):
