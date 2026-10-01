@@ -62,4 +62,4 @@ def render():
     try:
         year, mon = (int(p) for p in month.split("-"))
         month_start = dt.date(year, mon, 1)
-        month_end = dt.date(year + 1, 1, 1) if mon == 12 else
+        month_end = dt.date(year + 1, 1, 1) if mon == 12 else dt.date(year, mon + 1, 1)
