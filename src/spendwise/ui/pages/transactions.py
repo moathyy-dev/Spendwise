@@ -58,8 +58,13 @@ def render():
 
     if "txn_page" not in st.session_state:
         st.session_state["txn_page"] = 0
-
     try:
         year, mon = (int(p) for p in month.split("-"))
         month_start = dt.date(year, mon, 1)
-        month_end = dt.date(year + 1, 1, 1) if mon == 12 else dt.date(year, mon + 1, 1)
+        if mon == 12:
+            month_end = dt.date(year + 1, 1, 1)
+        else:
+            month_end = dt.date(year, mon + 1, 1)
+    except (ValueError, IndexError):
+        st.error("صيغة الشهر غير صحيحة — استخدم YYYY-MM.")
+        return
