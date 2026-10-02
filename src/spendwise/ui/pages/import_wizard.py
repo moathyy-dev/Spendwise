@@ -314,22 +314,72 @@ def _step_review(family_member_id: int):
             else:
                 approved_count += 1
 
-        st.divider()
-        st.subheader("ملخص المطابقة")
-        kept_rows = [r for r in staged_rows if not r.excluded and r.txn_date is not None]
-        income_total = sum(r.amount for r in kept_rows if r.direction == "credit")
-        expense_total = sum(r.amount for r in kept_rows if r.direction == "debit")
-        net = income_total - expense_total
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("معتمدة", approved_count)
-        c2.metric("مستبعدة", excluded_count)
-        c3.metric("إجمالي الدخل (دائن)", f"{income_total:.2f}")
-        c4.metric("إجمالي المصروف (مدين)", f"{expense_total:.2f}")
-        c5.metric("الصافي", f"{net:.2f}")
+    st.divider()
+    st.subheader("ملخص المطابقة")
+    kept_rows = [r for r in staged_rows if not r.excluded and r.txn_date is not None]
+    income_total = sum(r.amount for r in kept_rows if r.direction == "credit")
+    expense_total = sum(r.amount for r in kept_rows if r.direction == "debit")
+    net = income_total - expense_total
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("معتمدة", approved_count)
+    c2.metric("مستبعدة", excluded_count)
+    c3.metric("إجمالي الدخل (دائن)", f"{income_total:.2f}")
+    c4.metric("إجمالي المصروف (مدين)", f"{expense_total:.2f}")
+    c5.metric("الصافي", f"{net:.2f}")
 
-        col_a, col_b = st.columns(2)
-        if col_a.button("✅ تأكيد وحفظ", type="primary"):
-            _commit(family_member_id, staged_rows, fx_rates)
-        if col_b.button("إلغاء والبدء من جديد"):
-            _reset_wizard()
-            st.rerun()
+    col_a, col_b = st.columns(2)
+    if col_a.button("✅ تأكيد وحفظ", type="primary"):
+        _commit(family_member_id, staged_rows, fx_rates)
+    if col_b.button("إلغاء والبدء من جديد"):
+        _reset_wizard()
+        st.rerun()
+
+
+def _commit(family_member_id: int, staged_rows, fx_rates: dict):
+    account_id = st.session_state["iw_account_id"]
+    default_currency = st.session_state["iw_default_currency"]
+    file_fingerprints = st.session_state["iw_file_fingerprints"]
+
+    manual_fx_rates = {cur: Decimal(str(rate)) for cur, rate in fx_rates.items()}
+
+    learn_requests = [
+        (row.manual_category_override or row.category_id, row.merchant_sanitized, getattr(row, "_learn_scope", "single"))
+        for row in staged_rows
+        if not row.excluded and getattr(row, "_learn_scope", "single") == "future_rule" and (row.manual_category_override or row.category_id)
+    ]
+
+    try:
+        with session_scope() as session:
+            account = session.get(Account, account_id)
+            commit_import(
+                session=session,
+                account=account,
+                family_member_id=family_member_id,
+                file_label=f"استيراد {len(file_fingerprints)} ملف/ملفات",
+                file_fingerprints=file_fingerprints,
+                approved_rows=staged_rows,
+                base_currency=default_currency,
+                manual_fx_rates=manual_fx_rates,
+            )
+            for category_id, merchant, scope in learn_requests:
+                create_learned_rule(session, family_member_id, merchant, category_id, scope)
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"حدث خطأ أثناء الحفظ ولم يتم حفظ أي بيانات: {exc}")
+        return
+
+    st.session_state["iw_step"] = "done"
+    st.rerun()
+
+
+def _step_done():
+    st.success("✅ تم حفظ المعاملات المعتمدة بنجاح.")
+    st.balloons()
+    st.caption("يمكنك التراجع عن آخر استيراد من صفحة التقارير إذا احتجت لذلك.")
+    col_a, col_b = st.columns(2)
+    if col_a.button("استيراد ملف آخر"):
+        _reset_wizard()
+        st.rerun()
+    if col_b.button("الانتقال إلى لوحة المعلومات"):
+        _reset_wizard()
+        st.session_state["_nav_override"] = "🏠 لوحة المعلومات"
+        st.rerun()
