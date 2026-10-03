@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import io
+
+import pandas as pd
 import streamlit as st
 from sqlalchemy import select
 
@@ -83,6 +86,97 @@ def _find_duplicate_and_conflict(session, pattern: str, rtype: str, family_membe
         None,
     )
     return exact_duplicate, conflicting
+
+
+_STATUS_LABEL_TO_BOOL = {"نشط": True, "معطّل": False}
+_RULES_EXCEL_COLUMNS = ["المعرف", "النص/الكلمة المفتاحية", "التصنيف", "النوع", "الأولوية", "الحالة"]
+
+
+def _build_rules_export_dataframe(rules, category_options) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "المعرف": r.id,
+                "النص/الكلمة المفتاحية": r.pattern,
+                "التصنيف": category_options.get(r.category_id, ""),
+                "النوع": _RULE_TYPE_LABELS.get(r.rule_type.value if hasattr(r.rule_type, "value") else r.rule_type, ""),
+                "الأولوية": r.priority,
+                "الحالة": "نشط" if r.is_active else "معطّل",
+            }
+            for r in rules
+        ],
+        columns=_RULES_EXCEL_COLUMNS,
+    )
+
+
+def _parse_rules_import_dataframe(import_df: pd.DataFrame, category_options: dict, existing_ids: set):
+    """Pure parsing/validation logic, kept separate from Streamlit calls so it
+    can be unit-tested without a running app. Returns (updates, inserts,
+    invalid_rows, ignored_ids):
+      - updates: list of (rule_id, pattern, category_id, rtype, priority, is_active)
+      - inserts: list of (pattern, category_id, rtype, priority, is_active)
+      - invalid_rows: list of (excel_row_number, reason)
+      - ignored_ids: list of (excel_row_number, rule_id) — an id in the file
+        that no longer exists in the DB (e.g. deleted elsewhere); the row is
+        skipped rather than silently re-inserted as a "new" rule, since that
+        would reintroduce something the user deliberately removed.
+    """
+    category_name_to_id = {label: cid for cid, label in category_options.items()}
+    rtype_label_to_value = {label: value for value, label in _RULE_TYPE_LABELS.items()}
+
+    updates, inserts, invalid_rows, ignored_ids = [], [], [], []
+
+    for row_num, row in enumerate(import_df.to_dict("records"), start=2):  # row 2 = first data row in Excel
+        raw_id = str(row.get("المعرف") or "").strip()
+        pattern = str(row.get("النص/الكلمة المفتاحية") or "").strip()
+        cat_label = str(row.get("التصنيف") or "").strip()
+        rtype_label = str(row.get("النوع") or "").strip()
+        priority_raw = str(row.get("الأولوية") or "").strip()
+        status_label = str(row.get("الحالة") or "").strip()
+
+        if not pattern and not cat_label and not rtype_label and not priority_raw and not status_label:
+            continue  # fully blank row (e.g. trailing empty row) — skip silently
+
+        problems = []
+        if not pattern:
+            problems.append("النص/الكلمة المفتاحية فارغة")
+
+        cat_id_resolved = category_name_to_id.get(cat_label)
+        if cat_id_resolved is None:
+            problems.append(f"تصنيف غير معروف: «{cat_label}»")
+
+        rtype_resolved = rtype_label_to_value.get(rtype_label)
+        if rtype_resolved is None:
+            problems.append(f"نوع قاعدة غير معروف: «{rtype_label}»")
+
+        priority_resolved = None
+        try:
+            priority_resolved = int(float(priority_raw))
+        except (ValueError, TypeError):
+            problems.append(f"أولوية غير صالحة: «{priority_raw}»")
+
+        is_active_resolved = _STATUS_LABEL_TO_BOOL.get(status_label)
+        if is_active_resolved is None:
+            problems.append(f"حالة غير معروفة: «{status_label}» (يجب أن تكون «نشط» أو «معطّل»)")
+
+        if problems:
+            invalid_rows.append((row_num, "، ".join(problems)))
+            continue
+
+        if raw_id:
+            try:
+                rule_id = int(float(raw_id))
+            except ValueError:
+                invalid_rows.append((row_num, f"معرف غير صالح: «{raw_id}»"))
+                continue
+            if rule_id not in existing_ids:
+                ignored_ids.append((row_num, rule_id))
+                continue
+            updates.append((rule_id, pattern, cat_id_resolved, rtype_resolved, priority_resolved, is_active_resolved))
+        else:
+            inserts.append((pattern, cat_id_resolved, rtype_resolved, priority_resolved, is_active_resolved))
+
+    return updates, inserts, invalid_rows, ignored_ids
 
 
 def _render_rules(family_member_id):
@@ -229,3 +323,93 @@ def _render_rules(family_member_id):
             if added:
                 st.success("تمت إضافة القاعدة.")
                 st.rerun()
+
+        st.divider()
+        st.subheader("📊 تصدير / استيراد القواعد عبر إكسل")
+        st.caption(
+            "صدّر كل قواعدك الحالية كملف إكسل وعدّل عليه بحرية: غيّر أي عمود في صف موجود (يبقى عمود «المعرف» كما هو) "
+            "لتحديث نفس القاعدة، احذف صفًا كاملًا لحذف تلك القاعدة لاحقًا من الواجهة، أو أضف صفًا جديدًا في الأسفل "
+            "واترك عمود «المعرف» فارغًا لإضافة قاعدة جديدة. ثم ارفع الملف — التحديث يتم حسب «المعرف»، فلا يحصل تكرار."
+        )
+
+        export_df = _build_rules_export_dataframe(rules, category_options)
+        excel_buffer = io.BytesIO()
+        export_df.to_excel(excel_buffer, index=False, engine="openpyxl")
+        st.download_button(
+            "⬇️ تصدير القواعد كملف إكسل",
+            data=excel_buffer.getvalue(),
+            file_name="قواعد_التصنيف.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        uploaded_rules_file = st.file_uploader("📤 رفع ملف إكسل بعد التعديل", type=["xlsx"], key="rules_excel_upload")
+        if uploaded_rules_file is not None:
+            try:
+                import_df = pd.read_excel(uploaded_rules_file, engine="openpyxl", dtype=str)
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"تعذّرت قراءة الملف: {exc}")
+                import_df = None
+
+            if import_df is not None and not set(_RULES_EXCEL_COLUMNS).issubset(set(import_df.columns)):
+                st.error("الملف لا يحتوي على الأعمدة المطلوبة — تأكد إنك ما غيّرت أسماء الأعمدة في الصف الأول.")
+                import_df = None
+
+            if import_df is not None:
+                existing_ids = {r.id for r in rules}
+                updates, inserts, invalid_rows, ignored_ids = _parse_rules_import_dataframe(
+                    import_df, category_options, existing_ids
+                )
+
+                st.markdown("##### معاينة قبل التطبيق")
+                summary_cols = st.columns(4)
+                summary_cols[0].metric("تحديثات", len(updates))
+                summary_cols[1].metric("قواعد جديدة", len(inserts))
+                summary_cols[2].metric("صفوف غير صالحة", len(invalid_rows))
+                summary_cols[3].metric("معرفات غير موجودة", len(ignored_ids))
+
+                for row_num, reason in invalid_rows:
+                    st.warning(f"صف {row_num}: {reason} — تم تجاهله.")
+                for row_num, rid in ignored_ids:
+                    st.warning(f"صف {row_num}: القاعدة #{rid} غير موجودة (ربما انحذفت) — تم تجاهل الصف بدل ما يضيفها كقاعدة جديدة.")
+
+                if (updates or inserts) and st.button("✅ تأكيد تطبيق ملف الإكسل", type="primary"):
+                    applied_updates = 0
+                    applied_inserts = 0
+                    skipped_duplicates = 0
+                    with session_scope() as s2:
+                        for rule_id, pattern, cat_id_r, rtype_r, priority_r, is_active_r in updates:
+                            exact_duplicate, _ = _find_duplicate_and_conflict(
+                                s2, pattern, rtype_r, family_member_id, cat_id_r, exclude_rule_id=rule_id
+                            )
+                            if exact_duplicate:
+                                skipped_duplicates += 1
+                                continue
+                            r = s2.get(Rule, rule_id)
+                            r.pattern = pattern
+                            r.category_id = cat_id_r
+                            r.rule_type = RuleType(rtype_r)
+                            r.priority = priority_r
+                            r.is_active = is_active_r
+                            applied_updates += 1
+                        for pattern, cat_id_r, rtype_r, priority_r, is_active_r in inserts:
+                            exact_duplicate, _ = _find_duplicate_and_conflict(
+                                s2, pattern, rtype_r, family_member_id, cat_id_r
+                            )
+                            if exact_duplicate:
+                                skipped_duplicates += 1
+                                continue
+                            s2.add(
+                                Rule(
+                                    rule_type=RuleType(rtype_r), pattern=pattern, category_id=cat_id_r,
+                                    priority=priority_r, is_active=is_active_r, family_member_id=family_member_id,
+                                )
+                            )
+                            applied_inserts += 1
+                    # st.rerun() stays outside the "with" block — same fix as
+                    # the save/add buttons above; calling it inside would
+                    # roll back everything we just applied.
+                    st.success(
+                        f"تم تطبيق الملف: {applied_updates} تحديث، {applied_inserts} قاعدة جديدة"
+                        + (f"، تم تجاهل {skipped_duplicates} لأنها مكررة." if skipped_duplicates else ".")
+                    )
+                    st.rerun()
