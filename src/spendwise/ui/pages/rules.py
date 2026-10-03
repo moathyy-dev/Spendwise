@@ -157,6 +157,7 @@ def _render_rules(family_member_id):
                 if not trimmed_pattern:
                     st.warning("النص/الكلمة المفتاحية لا يمكن أن تكون فارغة.")
                 else:
+                    saved = False
                     with session_scope() as s2:
                         exact_duplicate, conflicting = _find_duplicate_and_conflict(
                             s2, trimmed_pattern, new_rtype, family_member_id, new_cat_id, exclude_rule_id=rule.id
@@ -178,8 +179,18 @@ def _render_rules(family_member_id):
                             r.category_id = new_cat_id
                             r.rule_type = RuleType(new_rtype)
                             r.priority = new_priority
-                            st.success("تم حفظ التعديلات.")
-                            st.rerun()
+                            saved = True
+                    # st.rerun() raises its own internal exception to stop the
+                    # script immediately — calling it INSIDE the
+                    # "with session_scope()" block above made session_scope's
+                    # except-clause treat that as a failure and roll back the
+                    # just-made edit instead of committing it, even though
+                    # st.success() below had already made it look saved. It
+                    # must run only after the "with" block has exited (so the
+                    # commit has already happened).
+                    if saved:
+                        st.success("تم حفظ التعديلات.")
+                        st.rerun()
 
         st.divider()
         st.subheader("إضافة قاعدة جديدة")
@@ -189,6 +200,7 @@ def _render_rules(family_member_id):
         priority = st.number_input("الأولوية (الأصغر = أولى)", value=300)
         if st.button("إضافة القاعدة", type="primary") and pattern.strip():
             trimmed_pattern = pattern.strip()
+            added = False
             with session_scope() as s2:
                 exact_duplicate, conflicting = _find_duplicate_and_conflict(
                     s2, trimmed_pattern, rtype, family_member_id, cat_id
@@ -211,5 +223,9 @@ def _render_rules(family_member_id):
                             priority=priority, is_active=True, family_member_id=family_member_id,
                         )
                     )
-                    st.success("تمت إضافة القاعدة.")
-                    st.rerun()
+                    added = True
+            # Same reason as the edit-save button above: st.rerun() must run
+            # after the "with" block has exited, never inside it.
+            if added:
+                st.success("تمت إضافة القاعدة.")
+                st.rerun()
